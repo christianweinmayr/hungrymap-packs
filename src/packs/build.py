@@ -130,6 +130,10 @@ def extract_features(pbf: Path, workdir: Path):
     )  # fmt: skip
     with open(seq) as f:
         for line in f:
+            # geojsonseq may use RS (0x1e) separators; empty regions yield blank lines.
+            line = line.strip().lstrip("\x1e")
+            if not line:
+                continue
             feat = json.loads(line)
             tags = feat.get("properties") or {}
             if not keep(tags):
