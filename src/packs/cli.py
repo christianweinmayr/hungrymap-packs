@@ -34,6 +34,16 @@ def cmd_regions(args) -> int:
     return 0
 
 
+def cmd_hours(args) -> int:
+    from .hours import run_queue
+    token = os.environ.get("HM_HOURS_CI_TOKEN")
+    if not token:
+        log("HM_HOURS_CI_TOKEN not set")
+        return 2
+    summary = run_queue(args.url.rstrip("/"), token, args.limit, args.deadline)
+    return 0 if summary.get("error", 0) < max(1, args.limit // 2) else 1
+
+
 def cmd_build(args) -> int:
     regions = load_regions(args.cache)
     if args.all:
@@ -81,6 +91,12 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("regions", help="list pack regions")
     p.add_argument("--continent")
     p.set_defaults(fn=cmd_regions)
+
+    p = sub.add_parser("hours", help="research opening hours for the app's queue (Worker)")
+    p.add_argument("--url", default=os.environ.get("HM_HOURS_URL", "https://hungrymap-hours.christian-weinmayr.workers.dev"))
+    p.add_argument("--limit", type=int, default=40)
+    p.add_argument("--deadline", type=float, default=11 * 60, help="stop starting new places after N seconds")
+    p.set_defaults(fn=cmd_hours)
 
     p = sub.add_parser("build", help="build packs")
     p.add_argument("--region", action="append", help="region id, e.g. austria or germany/bayern (repeatable)")

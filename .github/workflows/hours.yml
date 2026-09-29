@@ -1,0 +1,26 @@
+# Works the app's "places without opening hours" queue (Cloudflare Worker hungrymap-hours).
+name: Hours queue
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: hours-queue
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen || uv sync
+      - name: Research queued places
+        env:
+          HM_HOURS_CI_TOKEN: ${{ secrets.HM_HOURS_CI_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          HERE_API_KEY: ${{ secrets.HERE_API_KEY }}
+        run: uv run packs hours --limit 40 --deadline 600
