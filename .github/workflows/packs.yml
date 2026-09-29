@@ -1,0 +1,84 @@
+# Lives at the root of the hungrymap-packs repo (this directory is that repo's root).
+name: OSM packs
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # Mondays 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      continent:
+        description: "Geofabrik continent to build (or 'all')"
+        default: all
+        type: choice
+        options: [all, africa, antarctica, asia, australia-oceania, central-america, europe, north-america, russia, south-america]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: osm-packs
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: packs-latest
+  PACKS_BASE_URL: ${{ vars.PACKS_BASE_URL || 'https://github.com/christianweinmayr/hungrymap-packs/releases/download/packs-latest' }}
+
+jobs:
+  build:
+    name: build ${{ matrix.continent }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 3 # be polite to download.geofabrik.de
+      matrix:
+        continent: ${{ fromJSON((github.event_name == 'workflow_dispatch' && inputs.continent != 'all') && format('["{0}"]', inputs.continent) || '["africa","antarctica","asia","australia-oceania","central-america","europe","north-america","russia","south-america"]') }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen || uv sync
+      - run: uv run pytest -q
+      - name: Build packs
+        run: uv run packs build --all --continent "${{ matrix.continent }}" --no-keep-pbf
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: packs-${{ matrix.continent }}
+          path: |
+            out/*.sqlite.gz
+            out/*.json
+          if-no-files-found: warn
+          retention-days: 3
+
+  publish:
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen || uv sync
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packs-*
+          merge-multiple: true
+          path: out
+      - name: Ensure release exists
+        run: |
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --title "OSM packs (latest)" --latest=false \
+              --notes "Weekly OSM food-POI packs for Hungry Map. Data © OpenStreetMap contributors, ODbL."
+      - name: Upload packs
+        run: |
+          shopt -s nullglob
+          files=(out/*.sqlite.gz)
+          if [ ${#files[@]} -gt 0 ]; then gh release upload "$RELEASE_TAG" "${files[@]}" --clobber; fi
+      - name: Regenerate manifest
+        run: |
+          gh release download "$RELEASE_TAG" -p manifest.json -O prev-manifest.json || echo '{}' > prev-manifest.json
+          uv run packs manifest --previous prev-manifest.json
+          gh release upload "$RELEASE_TAG" out/manifest.json --clobber
+          if [ -f out/regions.geojson ]; then gh release upload "$RELEASE_TAG" out/regions.geojson --clobber; fi
