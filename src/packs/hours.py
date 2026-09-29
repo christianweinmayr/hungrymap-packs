@@ -316,6 +316,7 @@ LLM_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "mistralai/mistral-ne
 def rules_from_llm(snippets: str, name: str, api_key: str) -> list[Rule]:
     body = {
         "models": LLM_MODELS,
+        "provider": {"data_collection": "deny"},  # only providers that neither store nor train on inputs
         "messages": [
             {"role": "system", "content": "Extract the regular weekly opening hours of the named restaurant from website text. "
                                           "Ignore kitchen-only hours, delivery hours, holiday/seasonal exceptions and other businesses. "
