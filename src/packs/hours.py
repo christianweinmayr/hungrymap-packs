@@ -233,13 +233,50 @@ def visible_text(page: str) -> str:
     return "\n".join(l for l in lines if l)
 
 
+# Lines that look like opening hours without any keyword, e.g. "Di–Fr 11:30–14:30", "Mo - Sa 9-18 Uhr".
+_DAY = r"(?:mo|di|mi|do|fr|sa|so|mon|tue|wed|thu|fri|sat|sun|montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag|lun|mar|mer|gio|ven|sab|dom)"
+_HOURS_LINE = re.compile(_DAY + r"\.?\s*(?:[-–—,/&+]|bis|und)?\s*(?:" + _DAY + r"\.?)?[:\s]*\d{1,2}(?:[:.]\d{2})?\s*(?:uhr\s*)?[-–—]\s*\d{1,2}(?:[:.]\d{2})?", re.I)
+
+
+_DAY_KEYS = {
+    "mo": "Mo", "mon": "Mo", "montag": "Mo", "lun": "Mo", "di": "Tu", "tue": "Tu", "dienstag": "Tu", "mar": "Tu",
+    "mi": "We", "wed": "We", "mittwoch": "We", "mer": "We", "do": "Th", "thu": "Th", "donnerstag": "Th", "gio": "Th",
+    "fr": "Fr", "fri": "Fr", "freitag": "Fr", "ven": "Fr", "sa": "Sa", "sat": "Sa", "samstag": "Sa", "sab": "Sa",
+    "so": "Su", "sun": "Su", "sonntag": "Su", "dom": "Su",
+}
+_SIMPLE_LINE = re.compile(
+    r"^\s*(?P<d1>" + _DAY + r")\.?\s*(?:(?P<sep>[-–—]|bis)\s*(?P<d2>" + _DAY + r")\.?)?\s*:?\s*"
+    r"(?P<times>\d{1,2}(?:[:.]\d{2})?\s*(?:uhr)?\s*[-–—]\s*\d{1,2}(?:[:.]\d{2})?(?:\s*(?:uhr)?\s*(?:,|und|&|/)\s*\d{1,2}(?:[:.]\d{2})?\s*[-–—]\s*\d{1,2}(?:[:.]\d{2})?)*)\s*(?:uhr)?\s*$",
+    re.I)
+
+
+def rules_from_lines(text: str) -> list[Rule]:
+    """Deterministic parse of simple hours lines ("Di–Fr 11:30–14:30", "Sa 17-22 Uhr"). No model needed."""
+    rules: list[Rule] = []
+    for raw in text.splitlines():
+        m = _SIMPLE_LINE.match(raw.strip())
+        if not m:
+            continue
+        a = _DAY_KEYS.get(m.group("d1").lower()); b = _DAY_KEYS.get((m.group("d2") or "").lower()) if m.group("d2") else a
+        if not a or not b:
+            continue
+        i, j = DAYS.index(a), DAYS.index(b)
+        days = [DAYS[(i + k) % 7] for k in range((j - i) % 7 + 1)]
+        for t in re.finditer(r"(\d{1,2})(?:[:.](\d{2}))?\s*(?:uhr)?\s*[-–—]\s*(\d{1,2})(?:[:.](\d{2}))?", m.group("times"), re.I):
+            o = f"{int(t.group(1)):02d}:{t.group(2) or '00'}"; c = f"{int(t.group(3)):02d}:{t.group(4) or '00'}"
+            rules += [Rule(d, o, c) for d in days]
+    return rules
+
+
 def hours_snippets(text: str, window: int = 700) -> str:
-    """Text around hours keywords (keeps LLM input small and cheap)."""
+    """Text around hours keywords or hours-looking lines (keeps LLM input small and cheap)."""
     low = text.lower()
     spans = []
     for w in HOURS_WORDS:
         for m in re.finditer(re.escape(w), low):
             spans.append((max(0, m.start() - 150), min(len(text), m.start() + window)))
+    for m in _HOURS_LINE.finditer(text):
+        spans.append((max(0, m.start() - 200), min(len(text), m.end() + 300)))
     if not spans:
         return ""
     spans.sort()
@@ -381,6 +418,10 @@ def research(place: dict, openrouter_key: str | None, here_key: str | None) -> d
             pages = candidate_pages(site)
             rules = [r for p in pages for r in rules_from_jsonld(p)]
             if (oh := build_osm(rules)):
+                return {"key": key, "status": "found", "opening_hours": oh, "source": "website", "source_url": site}
+            # Simple hours lines: parse deterministically (the model merged "Di–Fr lunch" + "Di–So dinner").
+            line_rules = [r for p in pages for r in rules_from_lines(visible_text(p))]
+            if (oh := build_osm(line_rules)):
                 return {"key": key, "status": "found", "opening_hours": oh, "source": "website", "source_url": site}
             if openrouter_key:
                 snippets = "\n---\n".join(filter(None, (hours_snippets(visible_text(p)) for p in pages)))[:6000]

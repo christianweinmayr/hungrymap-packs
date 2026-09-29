@@ -34,3 +34,18 @@ def test_snippets_find_keywords():
     text = "Willkommen\n" + "x" * 3000 + "\nÖffnungszeiten\nMo–Fr 11–22 Uhr\nSa Ruhetag"
     s = hours_snippets(text)
     assert "Mo–Fr 11–22" in s and len(s) < 1200
+
+
+def test_snippets_find_hours_lines_without_keyword():
+    text = "Moderne Küche in Linz\n" + "Lorem ipsum " * 200 + "\nDi–Fr 11:30–14:30\nDi–So 17:30–22:30\nUntere Donaulände 16"
+    s = hours_snippets(text)
+    assert "Di–Fr 11:30–14:30" in s and "Di–So 17:30–22:30" in s
+
+
+def test_simple_lines_parsed_without_model():
+    from packs.hours import rules_from_lines
+    text = "Moderne Küche\nDi–Fr 11:30–14:30\nDi–So 17:30–22:30\nUntere Donaulände 16"
+    assert build_osm(rules_from_lines(text)) == "Tu-Fr 11:30-14:30,17:30-22:30; Sa,Su 17:30-22:30"
+    assert build_osm(rules_from_lines("Mo bis Sa 9-18 Uhr")) == "Mo-Sa 09:00-18:00"
+    assert build_osm(rules_from_lines("Sa 10:00 - 14:00 und 17:00 - 22:00")) == "Sa 10:00-14:00,17:00-22:00"
+    assert rules_from_lines("Mittagsmenü ab 9,90") == []
