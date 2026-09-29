@@ -10,6 +10,8 @@ packs = "packs.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]
+# Headless browser fallback for JavaScript-rendered restaurant sites (hours queue only).
+render = ["playwright>=1.50"]
 
 [build-system]
 requires = ["hatchling"]

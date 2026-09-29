@@ -99,7 +99,47 @@ def allowed(url: str) -> bool:
     return rp is None or rp.can_fetch(USER_AGENT, url)
 
 
+_browser = None  # lazily started Playwright Chromium (fallback for JavaScript-rendered sites)
+
+
+def _render(url: str) -> str | None:
+    """Render a JavaScript site (Meteor, React, Wix, …) with headless Chromium. Fallback only:
+    installed and started on first use; returns None if Playwright is unavailable."""
+    global _browser
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None
+    try:
+        if _browser is None:
+            import subprocess
+            import sys
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium-headless-shell"],
+                           check=False, capture_output=True, timeout=240)
+            _browser = sync_playwright().start().chromium.launch()
+        page = _browser.new_page(user_agent=USER_AGENT, locale="de-AT")
+        try:
+            page.goto(url, wait_until="networkidle", timeout=20_000)
+            page.wait_for_timeout(1500)
+            return page.content()
+        finally:
+            page.close()
+    except Exception as e:
+        print(f"render failed {url}: {e}", flush=True)
+        return None
+
+
 def get(url: str) -> str | None:
+    """Fetch a page; falls back to headless rendering when the HTML has almost no visible text."""
+    html = _get_raw(url)
+    if html is not None and len(visible_text(html)) < 300 and "<html" in html[:2000].lower():
+        rendered = _render(url)
+        if rendered and len(visible_text(rendered)) > len(visible_text(html)):
+            return rendered
+    return html
+
+
+def _get_raw(url: str) -> str | None:
     if not allowed(url):
         return None
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Language": "de,en;q=0.8"})

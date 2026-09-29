@@ -17,7 +17,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync --frozen || uv sync
+      - run: uv sync --group render
+      # Chromium is only downloaded when a JavaScript site is first hit; cache it between runs.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-v1
       - name: Research queued places
         env:
           HM_HOURS_CI_TOKEN: ${{ secrets.HM_HOURS_CI_TOKEN }}
