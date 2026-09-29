@@ -181,7 +181,21 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def build_region(region: Region, cache_dir: Path, out_dir: Path, keep_pbf: bool = True) -> dict:
+def content_hash(rows: list[dict], meta: dict) -> str:
+    """Fingerprint of the pack's data, independent of build/OSM timestamps."""
+    h = hashlib.sha256()
+    for key in ("schema_version", "country_code", "country_codes", "iso3166_2"):
+        h.update(f"{key}={meta.get(key)}\n".encode())
+    for row in sorted(rows, key=lambda r: r["id"]):
+        h.update("\x1f".join("" if row.get(c) is None else str(row.get(c)) for c in COLUMNS).encode())
+        h.update(b"\n")
+    return h.hexdigest()
+
+
+def build_region(region: Region, cache_dir: Path, out_dir: Path, keep_pbf: bool = True, previous: dict | None = None) -> dict:
+    """Build one pack. If `previous` (the region's last manifest entry) has the same content hash,
+    the pack is not rewritten: the .sqlite.gz is dropped and the previous file/url/sha256 are reused,
+    so CI skips the upload and apps skip the re-download."""
     t0 = time.monotonic()
     pbf = fetch(region.pbf_url, cache_dir / f"{region.flat_id}.osm.pbf")
     t_dl = time.monotonic() - t0
@@ -202,6 +216,15 @@ def build_region(region: Region, cache_dir: Path, out_dir: Path, keep_pbf: bool 
             "country_codes": ",".join(region.country_codes),
             "iso3166_2": region.iso3166_2,
         }
+        chash = content_hash(rows, meta)
+        if previous and previous.get("content_hash") == chash and previous.get("url"):
+            if not keep_pbf:
+                pbf.unlink(missing_ok=True)
+            result = {k: previous.get(k) for k in ("file", "bytes", "sqlite_bytes", "sha256", "count", "built_at", "osm_timestamp")}
+            result.update({"id": region.id, "content_hash": chash, "unchanged": True})
+            (out_dir / f"{region.flat_id}.json").write_text(json.dumps(result, indent=2) + "\n")
+            log(f"{region.id}: unchanged ({len(rows)} places), skipping upload")
+            return result
         db_path = tmp / f"{region.flat_id}.sqlite"
         write_sqlite(db_path, rows, meta)
         gz = out_dir / f"{region.flat_id}.sqlite.gz"
@@ -218,6 +241,7 @@ def build_region(region: Region, cache_dir: Path, out_dir: Path, keep_pbf: bool 
         "bytes": gz.stat().st_size,
         "sqlite_bytes": sqlite_bytes,
         "sha256": sha256(gz),
+        "content_hash": chash,
         "count": n,
         "built_at": built_at,
         "osm_timestamp": ts,

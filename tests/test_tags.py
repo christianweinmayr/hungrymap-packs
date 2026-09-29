@@ -76,3 +76,13 @@ def test_keep():
     assert keep({"amenity": "cafe", "opening_hours": "24/7"})
     assert not keep({"amenity": "cafe", "cuisine": "coffee_shop"})
     assert not keep({"amenity": "bank", "name": "X"})
+
+
+def test_content_hash_ignores_row_order_and_timestamps():
+    from packs.build import content_hash
+    rows = [{"id": "n2", "name": "B"}, {"id": "n1", "name": "A"}]
+    meta = {"schema_version": 1, "country_code": "AT", "built_at": "x", "osm_timestamp": "y"}
+    h1 = content_hash(rows, meta)
+    h2 = content_hash(list(reversed(rows)), {**meta, "built_at": "z", "osm_timestamp": "w"})
+    assert h1 == h2
+    assert content_hash([{"id": "n1", "name": "A2"}, rows[0]], meta) != h1

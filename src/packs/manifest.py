@@ -10,7 +10,7 @@ from .build import SCHEMA_VERSION, USER_AGENT, now_iso
 from .regions import Region, bbox, polygon_rings, simplify_geometry
 
 MANIFEST_MAX_BYTES = 3_000_000
-BUILD_FIELDS = ("file", "url", "bytes", "sqlite_bytes", "sha256", "count", "built_at", "osm_timestamp")
+BUILD_FIELDS = ("file", "url", "bytes", "sqlite_bytes", "sha256", "content_hash", "count", "built_at", "osm_timestamp")
 
 
 def load_previous(src: str | None) -> dict[str, dict]:

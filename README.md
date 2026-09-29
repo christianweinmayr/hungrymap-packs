@@ -154,3 +154,16 @@ centroid.
   (`FeatureCollection`, feature `id` = region id, geometry `MultiLineString` of
   the same rings) and the manifest gets `"polygons_url"`; `bbox` stays inline.
   Currently it is ~1.1 MB, so polygons are inline.
+
+## Lean weekly builds
+
+Each pack carries a `content_hash` (SHA-256 over its sorted rows + country metadata, ignoring
+timestamps). The weekly build passes the published manifest as `--previous`; regions whose content
+hash is unchanged are not rewritten or uploaded, and keep their previous `sha256`, so installed apps
+don't re-download them either. Geofabrik refreshes every extract daily, so source timestamps can't
+be used for skipping — only the content can.
+
+## Publishing
+
+`packs/` in the private `find-food` monorepo is the source of truth; the public
+`christianweinmayr/hungrymap-packs` repo mirrors it (its root = this directory) and runs the workflow.

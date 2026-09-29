@@ -39,8 +39,10 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen || uv sync
       - run: uv run pytest -q
+        if: github.event_name != 'schedule'
       - name: Build packs
-        run: uv run packs build --all --continent "${{ matrix.continent }}" --no-keep-pbf
+        # Regions whose content hash matches the published manifest are not rewritten or uploaded.
+        run: uv run packs build --all --continent "${{ matrix.continent }}" --no-keep-pbf --previous "$PACKS_BASE_URL/manifest.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -49,7 +51,7 @@ jobs:
             out/*.sqlite.gz
             out/*.json
           if-no-files-found: warn
-          retention-days: 3
+          retention-days: 1
 
   publish:
     needs: build

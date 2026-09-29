@@ -43,16 +43,19 @@ def cmd_build(args) -> int:
     else:
         log("specify --region or --all")
         return 2
+    previous = load_previous(args.previous)
     failed = []
+    unchanged = 0
     t0 = time.monotonic()
     for i, r in enumerate(todo, 1):
         log(f"[{i}/{len(todo)}] {r.id}")
         try:
-            build_region(r, args.cache, args.out, keep_pbf=not args.no_keep_pbf)
+            res = build_region(r, args.cache, args.out, keep_pbf=not args.no_keep_pbf, previous=previous.get(r.id))
+            unchanged += bool(res.get("unchanged"))
         except Exception as e:  # keep going; report at the end
             log(f"FAILED {r.id}: {e}")
             failed.append(r.id)
-    log(f"built {len(todo) - len(failed)}/{len(todo)} in {time.monotonic() - t0:.0f}s")
+    log(f"built {len(todo) - len(failed)}/{len(todo)} ({unchanged} unchanged) in {time.monotonic() - t0:.0f}s")
     if failed:
         log("failed: " + " ".join(failed))
     return 1 if failed else 0
@@ -84,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--all", action="store_true")
     p.add_argument("--continent", help="with --all: only this Geofabrik continent")
     p.add_argument("--no-keep-pbf", action="store_true", help="delete each pbf after building (CI disk space)")
+    p.add_argument("--previous", help="previous manifest.json (path or URL); regions whose content hash is unchanged are not rewritten")
     p.set_defaults(fn=cmd_build)
 
     p = sub.add_parser("manifest", help="write out/manifest.json")
