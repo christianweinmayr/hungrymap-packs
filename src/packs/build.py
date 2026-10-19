@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,18 +61,42 @@ def now_iso() -> str:
 
 def _request(url: str, method: str = "GET"):
     req = urllib.request.Request(url, method=method, headers={"User-Agent": USER_AGENT})
-    return urllib.request.urlopen(req, timeout=60)
+    return urllib.request.urlopen(req, timeout=180)
+
+
+RETRY_DELAYS = (15, 60, 180)  # seconds; Geofabrik times out / answers 502 under load (e.g. Monday mornings)
+
+
+def _transient(e: Exception) -> bool:
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code in (408, 429) or e.code >= 500
+    return isinstance(e, (urllib.error.URLError, TimeoutError, ConnectionError, OSError))
+
+
+def with_retries(fn, what: str, delays=RETRY_DELAYS, sleep=time.sleep):
+    """Run fn(); on transient network errors wait and try again (len(delays) retries)."""
+    for attempt in range(len(delays) + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == len(delays) or not _transient(e):
+                raise
+            log(f"{what}: {e} — retry {attempt + 1}/{len(delays)} in {delays[attempt]}s")
+            sleep(delays[attempt])
 
 
 def fetch(url: str, dest: Path) -> Path:
     """Download url to dest unless the cached copy is at least as new as the
     server's Last-Modified. The file's mtime is set to Last-Modified."""
     remote_mtime = remote_size = None
-    try:
+    def head():
         with _request(url, "HEAD") as r:  # follows Geofabrik's -latest -> -YYMMDD redirect
             lm = r.headers.get("Last-Modified")
-            remote_mtime = email.utils.parsedate_to_datetime(lm).timestamp() if lm else None
-            remote_size = int(r.headers["Content-Length"]) if r.headers.get("Content-Length") else None
+            mtime = email.utils.parsedate_to_datetime(lm).timestamp() if lm else None
+            size = int(r.headers["Content-Length"]) if r.headers.get("Content-Length") else None
+            return mtime, size
+    try:
+        remote_mtime, remote_size = with_retries(head, f"HEAD {dest.name}")
     except Exception as e:  # offline: fall back to cache
         if dest.exists():
             log(f"HEAD failed ({e}); using cached {dest.name}")
@@ -88,8 +113,10 @@ def fetch(url: str, dest: Path) -> Path:
     log(f"downloading {url}")
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_suffix(dest.suffix + ".part")
-    with _request(url) as r, open(part, "wb") as f:
-        shutil.copyfileobj(r, f, length=1 << 20)
+    def get():
+        with _request(url) as r, open(part, "wb") as f:
+            shutil.copyfileobj(r, f, length=1 << 20)
+    with_retries(get, f"download {dest.name}")
     part.replace(dest)
     if remote_mtime is not None:
         os.utime(dest, (remote_mtime, remote_mtime))

@@ -65,6 +65,20 @@ def cmd_build(args) -> int:
         except Exception as e:  # keep going; report at the end
             log(f"FAILED {r.id}: {e}")
             failed.append(r.id)
+    if failed:
+        # Second chance at the end of the run (source servers recover after a few minutes).
+        log(f"retrying {len(failed)} failed region(s) in 120s: {' '.join(failed)}")
+        time.sleep(120)
+        still = []
+        for rid in failed:
+            r = region_by_id(regions, rid)
+            try:
+                res = build_region(r, args.cache, args.out, keep_pbf=not args.no_keep_pbf, previous=previous.get(r.id))
+                unchanged += bool(res.get("unchanged"))
+            except Exception as e:
+                log(f"FAILED again {r.id}: {e}")
+                still.append(rid)
+        failed = still
     log(f"built {len(todo) - len(failed)}/{len(todo)} ({unchanged} unchanged) in {time.monotonic() - t0:.0f}s")
     if failed:
         log("failed: " + " ".join(failed))
